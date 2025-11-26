@@ -1,0 +1,17 @@
+{
+  "name": "timecheck-webhook-proxy",
+  "version": "1.0.0",
+  "description": "HikVision webhook proxy",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "node-fetch": "^2.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
