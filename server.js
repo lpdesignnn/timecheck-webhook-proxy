@@ -5,11 +5,20 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const CONVEX_URL = 'https://next-chicken-241.convex.site/raw';
 
-// Middleware to parse JSON
-app.use(express.json({ limit: '10mb' }));
-app.use(express.text({ limit: '10mb' }));
+// Log EVERY incoming request
+app.use((req, res, next) => {
+  console.log(`📨 [${req.method}] ${req.path}`);
+  console.log('📨 Headers:', JSON.stringify(req.headers, null, 2));
+  next();
+});
 
-// Health check endpoint
+// Parse JSON bodies
+app.use(express.json({ limit: '10mb' }));
+
+// Parse raw text bodies as fallback
+app.use(express.text({ type: '*/*', limit: '10mb' }));
+
+// Health check
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
@@ -18,60 +27,70 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Main webhook endpoint
+// Main webhook endpoint - POST
 app.post('/webhook/hikvision', async (req, res) => {
-  console.log('🎯 [WEBHOOK] Received POST from HikVision');
-  console.log('🎯 [WEBHOOK] Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('🎯 [WEBHOOK] Body type:', typeof req.body);
-  console.log('🎯 [WEBHOOK] Body length:', JSON.stringify(req.body).length);
-  console.log('🎯 [WEBHOOK] Body preview:', JSON.stringify(req.body).substring(0, 500));
+  console.log('🎯 [WEBHOOK POST] Received from HikVision');
+  console.log('🎯 Body type:', typeof req.body);
+  console.log('🎯 Body:', JSON.stringify(req.body).substring(0, 1000));
 
   try {
-    // Forward to Convex
+    let bodyToSend = req.body;
+    
+    // If body is string, try to parse it
+    if (typeof req.body === 'string') {
+      try {
+        bodyToSend = JSON.parse(req.body);
+      } catch (e) {
+        console.log('⚠️ Body is string, cannot parse as JSON');
+      }
+    }
+
     const response = await fetch(CONVEX_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(req.body),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyToSend),
     });
 
     const result = await response.text();
-    console.log('✅ [WEBHOOK] Forwarded to Convex successfully');
-    console.log('✅ [WEBHOOK] Convex response:', result);
+    console.log('✅ Forwarded to Convex:', result);
 
     res.status(200).send('OK');
   } catch (error) {
-    console.error('❌ [WEBHOOK] Error forwarding to Convex:', error);
+    console.error('❌ Error:', error);
     res.status(500).json({ error: 'Failed to forward webhook' });
   }
 });
 
-// Catch-all for other POST requests
-app.post('*', async (req, res) => {
-  console.log('⚠️ [CATCH-ALL] POST to:', req.path);
-  console.log('⚠️ [CATCH-ALL] Body:', JSON.stringify(req.body).substring(0, 200));
-  
-  try {
-    const response = await fetch(CONVEX_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(req.body),
-    });
+// Also handle GET (some devices send GET first)
+app.get('/webhook/hikvision', (req, res) => {
+  console.log('⚠️ [WEBHOOK GET] HikVision sent GET instead of POST');
+  res.status(200).send('Webhook endpoint is ready. Use POST to send data.');
+});
 
-    const result = await response.text();
-    res.status(200).send('OK');
-  } catch (error) {
-    console.error('❌ [CATCH-ALL] Error:', error);
-    res.status(500).json({ error: 'Failed to forward' });
+// Catch-all
+app.all('*', async (req, res) => {
+  console.log(`⚠️ [CATCH-ALL ${req.method}] ${req.path}`);
+  console.log('⚠️ Body:', JSON.stringify(req.body).substring(0, 200));
+  
+  if (req.method === 'POST') {
+    try {
+      await fetch(CONVEX_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req.body),
+      });
+      res.status(200).send('OK');
+    } catch (error) {
+      res.status(500).json({ error: 'Failed' });
+    }
+  } else {
+    res.status(404).send('Not found');
   }
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Railway Webhook Proxy running on port ${PORT}`);
+// Start server with explicit host binding
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Webhook Proxy running on 0.0.0.0:${PORT}`);
   console.log(`🎯 Ready to receive webhooks from HikVision`);
   console.log(`📡 Will forward to: ${CONVEX_URL}`);
 });
